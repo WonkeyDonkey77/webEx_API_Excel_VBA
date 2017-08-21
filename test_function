@@ -1,0 +1,127 @@
+Public Sub getWebEx()
+
+''===============================================================================
+''Program: 	GetWebexData - 1st test!!
+''Desc:		Test program to loop through end point and webex account arrays
+''		    calling webex data for each account and end point
+''		    specifically tested for event centre history reports
+''usage:	requires workbook with 3 sheets - config, session, attendee
+''config: set webex accounts here - email "A:3"->"A:6" 
+''						                      pass  "B:3"->"B:6"
+''			  Set webex endpoints here- "F:3"->"F:4"
+''			  xml response namespaces - "G:3"->"G:4"
+''			  outputworksheet 	- "H:3"->"H:4"
+''comment:	(1) re build into functional macro
+''		      (2) add forms to store webex data on private worksheet
+''		      (3) add better comments
+''CHANGES------------------------------------------------------------------------
+''Date		Programmer		Change
+''15/07/2017	R Molloy		Written
+''===============================================================================
+
+
+Dim sampleArr() As Variant 	' array to loop through account emails & passwords
+Dim endpointArr() As Variant	' array to loop through to call each of the end points 
+Dim rng As Range, cel As Range	' worksheet range to populate sampleArr with
+Dim endpointRng As Range	' worksheet range to populate endpointArr with
+Dim WebexID As String		' var to hold webex email - to be added to xml string
+Dim WebexPass As String		' var to hold webex pass - to be added to xml string
+Dim WebexSiteID As String	' for webex site ID - to be added to xml string
+WebexSiteID = ""; ' add webex site id here ie, 123uki:
+Dim XML_String As String	' var to hold request string
+Dim webExEndpoint As String	' var to hold end point - to be added to xml string
+Dim namespace As String		' var to add namespace for xml parsing
+Dim outputsheet As String	' var to hold worksheet for xml output
+Dim colCounter As Long		' to sount columns through child nodes
+Dim xmlhttp As New MSXML2.XMLHTTP60 ' xml request object
+Dim myurl As String		' XML service url
+
+Set rng = Sheets("config").Range("A3:B6") ' creates a 2 Dimensional array
+Set endpointRng = Sheets("config").Range("F3:H4") '  creates a 2 Dimensional array
+
+sampleArr = rng 'this sets the values in the range to this array.
+endpointArr = endpointRng 'this sets the values in the range to this array.
+
+'loop through endpoint - starts here
+y = 1
+For y = LBound(endpointArr) To UBound(endpointArr)
+    webExEndpoint = endpointArr(y, 1)
+    namespace = endpointArr(y, 2)
+    outputsheet = endpointArr(y, 3)
+    intCounter = 2
+    Sheets(outputsheet).Select
+	
+    'loop through each webex account    
+    x = 1
+    For x = LBound(sampleArr) To UBound(sampleArr)
+        WebexID = sampleArr(x, 1)  ' you need the ",1" since this is 2D.
+        WebexPass = sampleArr(x, 2)
+	
+	      'create request string - look at webex xml docs for details
+        XML_String = "<?xml version=""1.0"" encoding=""UTF-8""?>"
+        XML_String = XML_String & "<serv:message xmlns:xsi=""http://www.w3.org/2001/XMLSchema-instance"" 						xmlns:serv=""http://www.webex.com/schemas/2002/06/service"" xsi:schemaLocation=""http://www.webex.com/schemas/2002/06/service  					http://www.webex.com/schemas/2002/06/service/service.xsd"">"
+        XML_String = XML_String & "<header>"
+        XML_String = XML_String & "<securityContext>"
+        XML_String = XML_String & "<webExID>" & WebexID & "</webExID>"
+        XML_String = XML_String & "<password>" & WebexPass & "</password>"
+        XML_String = XML_String & "<siteName>" & WebexSiteID & "</siteName>"
+        XML_String = XML_String & "</securityContext>"
+        XML_String = XML_String & "</header>"
+        XML_String = XML_String & "<body>"
+        XML_String = XML_String & webExEndpoint
+        XML_String = XML_String & "<listControl>"
+        XML_String = XML_String & "<startFrom>1</startFrom>"
+        XML_String = XML_String & "<maximumNum>500</maximumNum>"
+        XML_String = XML_String & "</listControl>"
+        XML_String = XML_String & "</bodyContent>"
+        XML_String = XML_String & "</body>"
+        XML_String = XML_String & "</serv:message>"
+	
+	      'send data request         
+        myurl = "https://" & WebexSiteID & ".webex.com/WBXService/XMLService"
+        xmlhttp.Open "POST", myurl, False
+        xmlhttp.setRequestHeader "Content-Type", "application/x-www-form-urlencoded"
+        xmlhttp.send XML_String
+
+	       'create response object container        
+        Dim oXMLFile As MSXML2.DOMDocument60
+        Set oXMLFile = CreateObject("Msxml2.DOMDocument.6.0")
+
+	          'load response into object            
+            oXMLFile.LoadXML (xmlhttp.responseText)
+	          'add namespace to object
+            oXMLFile.setProperty "SelectionNamespaces", "xmlns:history='http://www.webex.com/schemas/2002/06/service/history'"
+            Set primaryInfo = oXMLFile.SelectNodes("//" & namespace)
+            Set ConfId = oXMLFile.SelectNodes("//" & namespace & "/history:confID")
+            	
+		          'loop through doc - set child doc for each response
+                For i = 0 To primaryInfo.Length - 1
+                    Set secondaryInfo = primaryInfo(i)
+                                     
+                       colCounter = 1
+		                   ' loop through child doc - outputting childnode and value to worksheet
+                       Do While colCounter < secondaryInfo.ChildNodes.Length
+			                      'if counter to add XML node names to 1st row
+                            If intCounter = 2 Then
+                                Worksheets(outputsheet).Range(Cells(1, colCounter + 1), Cells(1, colCounter + 1)).value = secondaryInfo.ChildNodes(colCounter 				- 1).BaseName
+				                        ' also to get confID to allow for future matching of attendees
+                                Worksheets(outputsheet).Range(Cells(1, 1), Cells(1, 1)).value = "confID"
+                            End If
+			                      ' if to add confid to first row
+                            If colCounter = 1 Then
+                            Worksheets(outputsheet).Range(Cells(intCounter, 1), Cells(intCounter, 1)).value = ConfId(i).Text
+                            End If
+			                      'out put node values to excel sheet
+                            Worksheets(outputsheet).Range(Cells(intCounter, colCounter + 1), Cells(intCounter, colCounter + 1)).value = 			    			    secondaryInfo.ChildNodes(colCounter - 1).Text
+                            colCounter = colCounter + 1
+                       Loop
+
+                intCounter = intCounter + 1
+                Set secondaryInfo = Nothing
+                
+                Next i
+    Next x
+    Set primaryInfo = Nothing
+  Next y
+
+End Sub
